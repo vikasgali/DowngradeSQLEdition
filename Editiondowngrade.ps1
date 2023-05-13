@@ -7,22 +7,19 @@ $backuplocation= '{{backuplocation}}'
 #S3 location for SQL installation Media and ConfigurationFile
 $S3BucketName = '{{S3BucketName}}'
 #S3 location for SQL CU
-#$S3CUBucketName = (Get-SSMParameterValue -Name S3CUBucketName).Parameters[0].Value 
+#$S3CUBucketName = (Get-SSMParameterValue -Name S3CUBucketName).Parameters[0].Value
 $S3CUName = '{{S3CUName}}'
 $saPwdSSM ='{{saPwdSSMParameter}}'
 $saPwd= (Get-SSMParameterValue -Name $saPwdSSM -WithDecryption:$true).Parameters[0].Value | ConvertTo-SecureString -AsPlainText -Force
-$timeStamp = Get-Date -format yyyy_MM_dd_HHmmss 
+$timeStamp = Get-Date -format yyyy_MM_dd_HHmmss
 Write-Host $SQLUsername
-Write-Host $SQLPasswordSSM
-Write-Host $SQLPassword
 Write-Host $backuplocation
 Write-Host $S3BucketName
 Write-Host $S3CUName
-Write-Host $saPwd
 $cred = new-object -typename System.Management.Automation.PSCredential -argumentlist $SQLUsername, $SQLPassword
 #Get-Credential -Credential $Cred
-#Create a new PowerShell session in the security context of the alternate user, using the PSCredential object we just created            
-$RunasDifferentUser= New-PSSession -Credential $cred; 
+#Create a new PowerShell session in the security context of the alternate user, using the PSCredential object we just created
+$RunasDifferentUser= New-PSSession -Credential $cred;
 Invoke-Command -Session $RunasDifferentUser -Script {
 # Write-Host $env:userdomain\$env:username
 function Write-Log
@@ -82,7 +79,7 @@ Throw
 Write-log "No pending Reboot, proceeding with next check"
 }
 }
-$TotalInstanceServices=Get-Service | Where-Object {$_.DisplayName -like "SQL Server (*"} 
+$TotalInstanceServices=Get-Service | Where-Object {$_.DisplayName -like "SQL Server (*"}
 If ($TotalInstanceServices.Count -gt 1)
 {
 Write-Log "Multiple SQL Instances are Installed on this Server.Not supported at this time" -Color Red
@@ -106,7 +103,7 @@ Write-Log "It's not Enterprise Edition.No Need to run script to downgrade" -Colo
 Throw
 }
 else
-{ 
+{
 Write-Log "Checking whether sql is running or not" -Color Green
 }
 #Get Current Time Stamp
@@ -118,7 +115,7 @@ If ($InstanceName -eq 'MSSQLSERVER')
 $SQLInstanceName ="."
 Write-Host $SQLInstanceName
 }
-else 
+else
 {
 $SQLInstancenName="localhost\"+$InstanceName+','+ $Port
 Write-Host $SQLInstanceName
@@ -160,16 +157,16 @@ Read-S3Object -BucketName $using:S3BucketName -KeyPrefix * -Folder $SQLInstallat
  $SecurityPattern='SECURITYMODE="SQL"'
  $SecurityMode=Get-Content "${InstallPath}\ConfigurationFile.ini" |  Select-String -Pattern 'SECURITYMODE="SQL"'
  Write-Host $SecurityMode
- if ([string]::IsNullOrWhiteSpace($SecurityMode)) 
+ if ([string]::IsNullOrWhiteSpace($SecurityMode))
  {
  Write-log "Windows Authentication mode installation"   -Color Green
  Write-Host $InstallPath
- $installaction="/ACTION=""Install"" /Q /IAcceptSqlServerLicenseTerms /configurationfile=""$SQLInstallationFolder\ConfigurationFile.ini""" 
+ $installaction="/ACTION=""Install"" /Q /IAcceptSqlServerLicenseTerms /configurationfile=""$SQLInstallationFolder\ConfigurationFile.ini"""
  Write-Host $action
  }
- else 
+ else
  {
- if ([string]::IsNullOrWhiteSpace($using:SaPwd)) 
+ if ([string]::IsNullOrWhiteSpace($using:SaPwd))
  {
  Write-log "Create Parameter for SA Password "   -Color Red
  }
@@ -178,54 +175,54 @@ Read-S3Object -BucketName $using:S3BucketName -KeyPrefix * -Folder $SQLInstallat
  Write-log "Mixed Authentication mode installation"
   $BSTR = `
   [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($Using:saPWD)
-  $sa = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR) 
- 
- $installaction="/ACTION=""Install"" /Q /IAcceptSqlServerLicenseTerms /SAPWD=""${sa}"" /configurationfile=""${SQLInstallationFolder}\ConfigurationFile.ini""" 
+  $sa = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
+
+ $installaction="/ACTION=""Install"" /Q /IAcceptSqlServerLicenseTerms /SAPWD=""${sa}"" /configurationfile=""${SQLInstallationFolder}\ConfigurationFile.ini"""
  }
  }
  #GET DB File Location (we are getting this info ,Uninstalling SQL will not remove tempdb files if they are in custom location)
  [array]$TempDBFileLocation = Invoke-Sqlcmd -ServerInstance $SQLInstancenName -Query "USE tempdb;
-                         SELECT 
+                         SELECT
                         physical_name
                         FROM sys.database_files;"
  $TempDBFileLocation.physical_name
  #User Database File location
- $userdbnames=Invoke-Sqlcmd -ServerInstance $SQLInstancenName -Query "SELECT 
-             DataFile.database_id, 
-             DataFile.name, 
-             DataFile.physical_name as DataFile, 
+ $userdbnames=Invoke-Sqlcmd -ServerInstance $SQLInstancenName -Query "SELECT
+             DataFile.database_id,
+             DataFile.name,
+             DataFile.physical_name as DataFile,
              LogFile.physical_name as LogFile
             FROM (SELECT * FROM sys.master_files WHERE type_desc = 'ROWS' ) DataFile
          JOIN (SELECT * FROM sys.master_files WHERE type_desc = 'LOG' ) LogFile
          ON DataFile.database_id = LogFile.database_id
          where DataFile.database_id>4;"
-                 
+
  #Get list of all Databases and backup them
  Write-host $using:backuplocation
  Write-host $using:timestamp
  $backupfolder = $using:backuplocation + "\" + $using:timeStamp
- Write-host $backupfolder    
+ Write-host $backupfolder
  if (Test-Path $backupfolder)
  {
  Write-Log "Folder Already Exists"
  }
  else{
- New-Item -path $backupfolder -ItemType Directory 
+ New-Item -path $backupfolder -ItemType Directory
  Write-Log "Backup Folder Created"
  }
- # New-Item -Path $backuplocation\$timeStamp -ItemType Directory 
+ # New-Item -Path $backuplocation\$timeStamp -ItemType Directory
  # $backupdevice=$backuplocation+"\"+ $backupfolder.Name
  #GET DB File Location (we are getting this info ,Uninstalling SQL will not remove tempdb files if they are in custom location)
  [array]$TempDBFileLocation = Invoke-Sqlcmd -ServerInstance $SQLInstancenName -Query "USE tempdb;
-                         SELECT 
+                         SELECT
                         physical_name
                          FROM sys.database_files;"
  $TempDBFileLocation.physical_name
  #User Database File location
  $userdbfilepath=$backupfolder+'\userdatabase_path.csv'
- 
- 
- $SQLPathCOMMAND="SET NOCOUNT ON 
+
+
+ $SQLPathCOMMAND="SET NOCOUNT ON
  DECLARE     @cmd        VARCHAR(MAX),
  @dbname     VARCHAR(200),
  @prevdbname VARCHAR(200)
@@ -245,8 +242,8 @@ Read-S3Object -BucketName $using:S3BucketName -KeyPrefix * -Folder $SQLInstallat
  AND DB_NAME(dbid) NOT IN ('master','tempdb','msdb','model')
  ORDER BY dbname, fileid, filename
  UPDATE #Attach
- SET @cmd = TxtAttach =  
- CASE WHEN dbname <> @prevdbname 
+ SET @cmd = TxtAttach =
+ CASE WHEN dbname <> @prevdbname
  THEN CONVERT(VARCHAR(200),'exec sp_attach_db @dbname = N''' + dbname + '''')
  ELSE @cmd
  END +',@filename' + CONVERT(VARCHAR(10),fileid) + '=N''' + filename +'''',
@@ -256,7 +253,7 @@ Read-S3Object -BucketName $using:S3BucketName -KeyPrefix * -Folder $SQLInstallat
  OPTION (MAXDOP 1)
  SELECT dbname,TxtAttach
  from
- (SELECT dbname, MAX(TxtAttach) AS TxtAttach FROM #Attach 
+ (SELECT dbname, MAX(TxtAttach) AS TxtAttach FROM #Attach
  GROUP BY dbname) AS x
  DROP TABLE #Attach
  GO"
@@ -267,10 +264,10 @@ Read-S3Object -BucketName $using:S3BucketName -KeyPrefix * -Folder $SQLInstallat
  {
  try
  {
- Write-log "Backup Started for $Db" -Color Green   
+ Write-log "Backup Started for $Db" -Color Green
  $backupFullPath=$backupfolder + "\" + $Db + "_" + $using:timeStamp + ".bak"
  Backup-SqlDatabase -ServerInstance $SQLInstanceName -Database $Db -BackupFile $backupFullPath
- Write-log "Backup Finished for $Db" -Color Green       
+ Write-log "Backup Finished for $Db" -Color Green
  }
  Catch
  {
@@ -278,10 +275,10 @@ Read-S3Object -BucketName $using:S3BucketName -KeyPrefix * -Folder $SQLInstallat
  write-log ($Error[0].Exception)
  Throw
  }
- } 
+ }
  Write-Log "System Databases file copy started"
 $systemfiles=Invoke-sqlcmd -ServerInstance $SQLInstancenName -Query "select filename from sysaltfiles where dbid in (1,4)"
-$ServiceName=(Get-Service | Where-Object {$_.DisplayName -like "SQL Server (*"}).Name 
+$ServiceName=(Get-Service | Where-Object {$_.DisplayName -like "SQL Server (*"}).Name
 Stop-Service -Force $ServiceName
 $files=$systemfiles.filename
 foreach ($file in $files)
@@ -289,9 +286,9 @@ foreach ($file in $files)
 Write-Log "Copying file ${file}"
 Copy-Item -Path $file -Destination $backupfolder\
 
-} 
+}
 
- 
+
  #Setup File Location
  $setupfileLocation = Get-ChildItem -Recurse -Include setup.exe -Path "$env:ProgramFiles\Microsoft SQL Server" -ErrorAction SilentlyContinue |
  Where-Object { $_.FullName -match 'Setup Bootstrap\\SQL' -or $_.FullName -match 'Bootstrap\\Release\\Setup.exe' -or $_.FullName -match 'Bootstrap\\Setup.exe' } |
@@ -312,10 +309,10 @@ Copy-Item -Path $file -Destination $backupfolder\
  $SQLErrorLogFile=Split-Path $setupfileLocation.DirectoryName
  $SQLErrorLogFileLocation=$SQLErrorLogFile + "\Log\Summary.txt"
  $CheckError = Select-String -Path $SQLErrorLogFileLocation -Pattern "Failed: see details below"
- if ([string]::IsNullOrWhiteSpace($CheckError)) 
+ if ([string]::IsNullOrWhiteSpace($CheckError))
  {
  Write-log "SQL Uninstalled Successfully"   -Color Green
- }else 
+ }else
  {
  Write-log "SQL Uninstallation failed"   -Color Red
  Throw
@@ -378,11 +375,11 @@ Copy-Item -Path $file -Destination $backupfolder\
  Write-host $updateaction
  $CheckError = Select-String -Path $SQLErrorLogFileLocation -Pattern "Failed: see details below","Passed but reboot required, see logs for details"
  Write-Host $CheckError
- if ([string]::IsNullOrWhiteSpace($CheckError)) 
+ if ([string]::IsNullOrWhiteSpace($CheckError))
  {
  Write-log "SQL Installed Successfully"   -Color Green
  Write-Host $using:S3CUName
- if ([string]::IsNullOrWhiteSpace($using:S3CUName)) 
+ if ([string]::IsNullOrWhiteSpace($using:S3CUName))
  {
  Write-Log "There is no Cummulative Update to apply"
  }
@@ -390,15 +387,15 @@ Copy-Item -Path $file -Destination $backupfolder\
  #Install SQL Server CU
  #/SQLSVCPASSWORD="password" /ASSVCPASSWORD="password" /AGTSVCPASSWORD="password" /ISSVCPASSWORD="password" /RSSVCPASSWORD="password" /SAPWD="password" /ConfigurationFile=ConfigurationFile.INI
  #change the config file settings to your file name
- Start-Process -WorkingDirectory $Path -FilePath $using:S3CUName  $updateaction -Wait 
+ Start-Process -WorkingDirectory $Path -FilePath $using:S3CUName  $updateaction -Wait
  }
  }
- else 
+ else
  {
  if ($Rebootformatted -gt $Summarytime)
  {
  Write-Host "Reboot has occured after last failed attempt"
- Start-Process -WorkingDirectory $Path -FilePath $using:S3CUName  $updateaction -Wait 
+ Start-Process -WorkingDirectory $Path -FilePath $using:S3CUName  $updateaction -Wait
  }
  else{
  Write-log "SQL Installation failed or Reboot Required"   -Color Red
@@ -406,11 +403,11 @@ Copy-Item -Path $file -Destination $backupfolder\
  }
  }
  }
- 
- 
+
+
  Write-Log "Restore Database"
  Invoke-Command -Session $RunasDifferentUser -Script{
- 
+
  $backupfolder = $using:backuplocation + "\" + $using:timeStamp
  $userdbfilepath=$backupfolder+'\userdatabase_path.csv'
  $InstanceName= (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server').InstalledInstances
@@ -449,11 +446,11 @@ Copy-Item -Path $file -Destination $backupfolder\
  Throw
  }
  else
- { 
+ {
  Write-Log "Checking whether sql is running or not" -Color Green
  }
  #Get Current Time Stamp
- $InstanceService=Get-Service | Where-Object {$_.DisplayName -like "SQL Server (*"} 
+ $InstanceService=Get-Service | Where-Object {$_.DisplayName -like "SQL Server (*"}
  $InstService=$InstanceService.Name
  #Check If SQL Server is Running or not
  $status =get-service $InstanceService.Name | select Status
@@ -477,11 +474,11 @@ Copy-Item -Path $file -Destination $backupfolder\
  {
  $SQLInstanceName ="."
  }
- else 
+ else
  {
  $SQLInstancenName="localhost\"+$InstanceName
  }
- Import-CSV $userdbfilepath | ForEach-Object { 
+ Import-CSV $userdbfilepath | ForEach-Object {
  #Current row object
  $CSVRecord = $_
  $attachcmd2 = $CSVRecord.'TxtAttach'
@@ -497,7 +494,7 @@ Copy-Item -Path $file -Destination $backupfolder\
  Throw
  }
  }
- 
+
 $newsystemfiles=(Invoke-sqlcmd -ServerInstance $SQLInstanceName -Query "select filename from sysaltfiles where dbid in (1,4)").filename
 Stop-Service  $InstService
 
@@ -508,14 +505,13 @@ Rename-Item -Path $newsystemfile -NewName $newfilename
 $pathpos=$newsystemfile.LastIndexOf("\")
 $dbfilepos=($newsystemfile.length - $pathpos -1)
 $systempath=$newsystemfile.Substring(0,$pathpos+1)
-$dbfilename=$newsystemfile.SubString($newsystemfile.length - $dbfilepos) 
-$oldfile= (Get-ChildItem $backupfolder -Recurse -Include $dbfilename).name 
+$dbfilename=$newsystemfile.SubString($newsystemfile.length - $dbfilepos)
+$oldfile= (Get-ChildItem $backupfolder -Recurse -Include $dbfilename).name
 Write-Log "Copying System databases files"
 Copy-Item -Path $backupfolder\$oldfile -Destination $systempath\
-}  
+}
 Write-Log "Starting SQL Server "
 Start-Service $InstService
 
 
  }
- 
