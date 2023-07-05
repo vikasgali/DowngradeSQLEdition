@@ -1,24 +1,25 @@
 
-            $UserSecret = 'editiondowngradeUser'
+            #Windows downgrade user secrets
+
+            $UserSecret = '{{DowngradeUserSecret}}'
             #SQL Creds to run commands on SQL Server. Its recommended to use Windows Authentication
             $SQLUsername =  Get-SECSecretValue -SecretId $UserSecret -Select SecretString | ConvertFrom-Json | Select -ExpandProperty username 
             $SQLPwd= Get-SECSecretValue -SecretId $UserSecret -Select SecretString | ConvertFrom-Json | Select -ExpandProperty password
             $SQLpassword = ConvertTo-SecureString $SQLpwd -AsPlainText -Force 
             #Backup location where you want your backups to go
-            $backuplocation= 'D:\AutomationBackup'
+            $backuplocation= '{{backuplocation}}'
             #S3 location for SQL installation Media and ConfigurationFile
-            $S3BucketName = 'edition-downgrade-test'
+            $S3BucketName = '{{S3BucketName}}'
             #S3 location for SQL CU
             #$S3CUBucketName = (Get-SSMParameterValue -Name S3CUBucketName).Parameters[0].Value 
-            $S3CUName = ''
-            $saPwdSSM ='editionDowngradeSA'
+            $S3CUName = '{{S3CUName}}'
+            $saPwdSSM ='{{saPwdSecret}}'
             $saPwd= Get-SECSecretValue -SecretId $saPwdSSM -Select SecretString | ConvertFrom-Json | Select -ExpandProperty password
             $timeStamp = Get-Date -format yyyy_MM_dd_HHmmss 
             Write-Host $SQLUsername
             Write-Host $backuplocation
             Write-Host $S3BucketName
             Write-Host $S3CUName
-            
             $cred = New-Object System.Management.Automation.PSCredential ($SQLUsername, $SQLpassword) 
             #Get-Credential -Credential $Cred
             #Create a new PowerShell session in the security context of the alternate user, using the PSCredential object we just created            
@@ -94,13 +95,7 @@
             Throw
             }
             $InstanceService= $TotalInstanceServices.Name
-            Write-Log $using:SQLUsername
-            Write-Log $using:SQLPassword
-           
-            Write-Log $using:backuplocation
-            Write-Log $using:S3BucketName
-            Write-Log $using:S3CUName
-            
+                    
             #Check Whether Enterprise Edition is installed or not
             $InstanceName= (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server').InstalledInstances
             $InstanceID=Get-ItemPropertyValue -Path 'HKLM:\SOFTWARE\Microsoft\Microsoft SQL Server\Instance Names\SQL' -Name $InstanceName
@@ -160,6 +155,7 @@
             Write-Log $SQLInstallationFolder
             New-Item -ItemType directory $SQLInstallationFolder
             Read-S3Object -BucketName $using:S3BucketName -KeyPrefix * -Folder $SQLInstallationFolder
+
             #Check Whether Installation is Mixed Authentication and look for SA Password####
              $SQLInstallationFolder=$SQLInstallationFolder+ "\SQLinstall"
              $InstallPath=$SQLInstallationFolder
@@ -281,7 +277,7 @@
              }
              } 
              
-            $systemfiles=Invoke-sqlcmd -ServerInstance $SQLInstancenName -Query "select filename from sysaltfiles where dbid in (1,4)" -TrustServerCertificate
+            $systemfiles=Invoke-sqlcmd -ServerInstance $SQLInstancenName -Query "select filename from sysaltfiles where dbid in (1,3,4)" -TrustServerCertificate
             $ServiceName=(Get-Service | Where-Object {$_.DisplayName -like "SQL Server (*"}).Name 
             Stop-Service -Force $ServiceName
             $files=$systemfiles.filename
@@ -306,8 +302,13 @@
              #Delete Orphan tempdb files
              foreach ($file in $TempDBFileLocation.physical_name)
              {
+             if (Test-Path $file)
+             {
              Remove-Item  $file -Force
              Write-Log "$file is removed"
+             }
+             else {Write-Log "$file is removed"
+             }
              }
              $SQLErrorLogFile=Split-Path $setupfileLocation.DirectoryName
              $SQLErrorLogFileLocation=$SQLErrorLogFile + "\Log\Summary.txt"
@@ -315,18 +316,114 @@
              if ([string]::IsNullOrWhiteSpace($CheckError)) 
              {
              Write-log "SQL Uninstalled Successfully"   -Color Green
-             }else 
+
+             #######Check for Reboot Requirement
+             $CheckReboot = Select-String -Path $SQLErrorLogFileLocation -Pattern "Passed but reboot required, see logs for details"
+             if ([string]::IsNullOrWhiteSpace($CheckError)) 
+             {
+             Write-log "No reboot required and Proceed with Installation"   -Color Green
+             Start-Process -FilePath "setup.exe" -WorkingDirectory $InstallPath $installaction -Wait
+             }
+             else 
+             {
+             Write-log "Reboot Required before Installation"   -Color Red
+             EXIT 3010
+
+             }
+             }
+             else 
              {
              Write-log "SQL Uninstallation failed"   -Color Red
              Throw
              }
-             Write-log "SQL Installation Started"   -Color Green
-             #Install SQL Server
-             # Add  /PID for Product key
-             #/SQLSVCPASSWORD="password" /ASSVCPASSWORD="password" /AGTSVCPASSWORD="password" /ISSVCPASSWORD="password" /RSSVCPASSWORD="password" /SAPWD="password" /ConfigurationFile=ConfigurationFile.INI
-             #change the config file settings to your file name
-             Start-Process -FilePath "setup.exe" -WorkingDirectory $InstallPath $installaction -Wait
+
+             
+             } 
+
+
+             #############################<# SQL Install after reboot #>######################################
+
+            Invoke-Command -Session $RunasDifferentUser -Script {
+            # Write-Host $env:userdomain\$env:username
+            function Write-Log
+            {
+            PARAM
+            (
+            [Parameter(Mandatory = $true)] [string] $Message
+            ,[ValidateSet("Green", "Yellow", "Red")] [string] $Color
+            )
+            $Datestamp = [datetime]::Now.ToString('yyyy-MM-dd HH:mm:ss.fff')
+            $CompleteMessage = "$Datestamp $Message"
+            if($Color)
+            {
+            Write-Host $CompleteMessage -ForegroundColor $Color
+            }
+            else
+            {
+            Write-Host $CompleteMessage
+            }
+            Write-Output $CompleteMessage | out-file -encoding ASCII $LogFile -Append
+            }
+            $DestinationDriveFolder="C:\Windows\temp"
+            $LogFile = $DestinationDriveFolder + "\Logfile_Reboot.txt"
+
+            if (Test-Path $LogFile)
+            {
+            Remove-Item -Path $LogFile
+            New-Item -path $LogFile
+            Write-Log "New Log File Created"
+            }
+
+
+
+            ###Check Whether SQL is already installed#############
+
+            $TotalInstanceServices=Get-Service | Where-Object {$_.DisplayName -like "SQL Server (*"} 
+            If ($TotalInstanceServices.Count -eq 0)
+            {
+            Write-Log "Proceeding with SQL Install" -Color Green
+            #Check Whether Installation is Mixed Authentication and look for SA Password####
+             $SQLInstallationFolder="D:\SQL" + "_" + $using:timeStamp
+             $SQLInstallationFolder=$SQLInstallationFolder+ "\SQLinstall"
+             $InstallPath=$SQLInstallationFolder
+             $SecurityPattern='SECURITYMODE="SQL"'
+             $SecurityMode=Get-Content "${InstallPath}\ConfigurationFile_WithAllSettingsFinal.ini" |  Select-String -Pattern 'SECURITYMODE="SQL"'
+             
+             Write-Host $SecurityMode
+             if ([string]::IsNullOrWhiteSpace($SecurityMode)) 
+             {
+             Write-log "Windows Authentication mode installation"   -Color Green
+             Write-Host $InstallPath
+             $installaction="/ACTION=""Install"" /Q /IAcceptSqlServerLicenseTerms /configurationfile=""$SQLInstallationFolder\ConfigurationFile_WithAllSettingsFinal.ini""" 
+             Write-Host $action
              }
+             else 
+             {
+             if ([string]::IsNullOrWhiteSpace($using:SaPwd)) 
+             {
+             Write-log "Create Parameter for SA Password "   -Color Red
+             }
+             else
+             {
+             Write-log "Mixed Authentication mode installation"
+             $sa=$using:saPWD
+             $installaction="/ACTION=""Install"" /Q /IAcceptSqlServerLicenseTerms /SAPWD=$sa /configurationfile=""${SQLInstallationFolder}\ConfigurationFile_WithAllSettingsFinal.ini""" 
+             }
+             }
+             Write-Log "Installing SQL Server After Reboot" -Color Green
+             Start-Process -FilePath "setup.exe" -WorkingDirectory $InstallPath $installaction -Wait
+
+            }
+            elseif ($TotalInstanceServices.Count -ne 0)
+            {
+            Write-Log "SQL is installed on Previous step" -Color Green
+
+            }
+
+
+            }
+
+            ###################Install SQL Server CU ####################
              Invoke-Command -Session $RunasDifferentUser -Script{
              function Write-Log
              {
@@ -404,7 +501,7 @@
              }
              }
              }
-             Write-Log "Restore Database"
+             
              Invoke-Command -Session $RunasDifferentUser -Script{
              #$backupfolder="D:\SQLData\2023_03_07_215318"
              $backupfolder = $using:backuplocation + "\" + $using:timeStamp
@@ -498,7 +595,7 @@
              }
              }
             Write-Log "Starting System Databases recovery" -Color Green 
-            $newsystemfiles=(Invoke-sqlcmd -ServerInstance $SQLInstanceName -TrustServerCertificate -Query "select filename from sysaltfiles where dbid in (1,4)").filename 
+            $newsystemfiles=(Invoke-sqlcmd -ServerInstance $SQLInstanceName -TrustServerCertificate -Query "select filename from sysaltfiles where dbid in (1,3,4)").filename 
             Write-Log "Stopping SQL instance"
             Stop-Service  MSSQLSERVER
             foreach ($newsystemfile in $newsystemfiles){
@@ -510,12 +607,9 @@
             $dbfilename=$newsystemfile.SubString($newsystemfile.length - $dbfilepos) 
             $oldfile= (Get-ChildItem $using:backuplocation\ -Recurse -Include $dbfilename).name 
             Copy-Item -Path $using:backuplocation\$oldfile -Destination $systempath\
-            
+
             }  
             Write-Log "System database files copied"
             Write-Log "Starting SQL Service"
             Start-Service  MSSQLSERVER
             }
-
-             
-                  
