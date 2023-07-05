@@ -2,7 +2,14 @@
 
 Sample code to downgrade Standalone SQL Enterprise to other Editions(Standard,Developer,Web) .
 
+# ConfigurationFile_withALlSettings.ini
+This file is used to Install SQL Server. Modify/Create similar Configuration file for the version of SQL Server 
 
+# Editiondowngrade.ps1
+This powershell script needs to be used as part of SSM document that will do SQL Server downgrade
+
+# SSMDocumentEditionDowngradeContent
+This is the content of SSM Document that can be used to create SSM document in your AWS Account to automate the SQL downgrade
 
 # Pre-Requisites
 1.Amazon EC2 windows Instance with SQL Server Enterprise Edition Installed
