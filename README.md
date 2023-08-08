@@ -1,6 +1,6 @@
 # DowngradeSQLEdition
 
-Sample code to downgrade Standalone SQL Enterprise to other Editions(Standard,Developer,Web) .
+Sample SSM document code to downgrade Standalone SQL Enterprise to other Editions(Standard,Developer,Web) .
 
 # ConfigurationFile_withALlSettings.ini
 This file is used to Install SQL Server. Modify/Create similar Configuration file for the version of SQL Server 
